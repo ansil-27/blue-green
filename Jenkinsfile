@@ -26,8 +26,7 @@ pipeline {
                         aws elbv2 describe-listeners \
                           --listener-arns "$LISTENER_ARN" \
                           --query 'Listeners[0].DefaultActions[0].TargetGroupArn' \
-                          --output text \
-                          --no-cli-pager
+                          --output text
                         """,
                         returnStdout: true
                     ).trim()
@@ -36,10 +35,12 @@ pipeline {
 
                     if (activeTG.contains("tg-blue")) {
                         env.TARGET_ENV  = "green"
+                        env.TARGET_PORT = "8001"
                         env.TARGET_TG   = env.TG_GREEN_ARN
                         env.ROLLBACK_TG = env.TG_BLUE_ARN
                     } else {
                         env.TARGET_ENV  = "blue"
+                        env.TARGET_PORT = "8000"
                         env.TARGET_TG   = env.TG_BLUE_ARN
                         env.ROLLBACK_TG = env.TG_GREEN_ARN
                     }
@@ -49,14 +50,15 @@ pipeline {
             }
         }
 
-        stage('Run Candidate Container') {
+        stage('Deploy New Version') {
             steps {
                 sh '''
-                docker rm -f candidate-app || true
+                docker stop ${TARGET_ENV}-app || true
+                docker rm ${TARGET_ENV}-app || true
 
                 docker run -d \
-                  --name candidate-app \
-                  -p 8080:80 \
+                  --name ${TARGET_ENV}-app \
+                  -p ${TARGET_PORT}:80 \
                   $IMAGE
                 '''
             }
@@ -65,8 +67,7 @@ pipeline {
         stage('Smoke Test') {
             steps {
                 sh '''
-                echo "Testing candidate..."
-                curl -f http://localhost:8000/health || curl -f http://localhost:8000/
+                curl -f http://localhost:${TARGET_PORT}/
                 '''
             }
         }
@@ -76,36 +77,19 @@ pipeline {
                 sh '''
                 aws elbv2 modify-listener \
                   --listener-arn "$LISTENER_ARN" \
-                  --default-actions Type=forward,TargetGroupArn=$TARGET_TG \
-                  --no-cli-pager
+                  --default-actions Type=forward,TargetGroupArn=$TARGET_TG
                 '''
             }
         }
 
-        stage('Verify Deployment') {
+        stage('Verify') {
             steps {
                 sh '''
                 sleep 10
-
                 aws elbv2 describe-listeners \
                   --listener-arns "$LISTENER_ARN" \
                   --query 'Listeners[0].DefaultActions[0].TargetGroupArn' \
-                  --output text \
-                  --no-cli-pager
-                '''
-            }
-        }
-
-        stage('Finalize Deployment') {
-            steps {
-                sh '''
-                docker stop candidate-app || true
-                docker rm candidate-app || true
-
-                docker run -d \
-                  --name ${TARGET_ENV}-app \
-                  -p 80:80 \
-                  $IMAGE
+                  --output text
                 '''
             }
         }
@@ -119,12 +103,9 @@ pipeline {
 
         failure {
             sh '''
-            docker rm -f candidate-app || true
-
             aws elbv2 modify-listener \
               --listener-arn "$LISTENER_ARN" \
-              --default-actions Type=forward,TargetGroupArn=$ROLLBACK_TG \
-              --no-cli-pager || true
+              --default-actions Type=forward,TargetGroupArn=$ROLLBACK_TG || true
             '''
             echo "Rollback Completed"
         }
