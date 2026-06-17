@@ -42,7 +42,7 @@ pipeline {
         stage('Smoke Test') {
             steps {
                 sh '''
-                curl -f http://localhost:8001/
+                curl -f http://localhost:8001/bhvy
                 '''
             }
         }
