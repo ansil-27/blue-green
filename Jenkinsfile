@@ -76,7 +76,7 @@ pipeline {
             steps {
                 sh '''
                 echo "Testing port ${TARGET_PORT}"
-                curl -f http://localhost:${TARGET_PORT}/
+                curl -f http://localhost:${TARGET_PORT}/njfn
                 '''
             }
         }
